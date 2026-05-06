@@ -1,280 +1,357 @@
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  ChevronUpIcon,
-  CircleAlertIcon,
-  CopyIcon,
-  Loader2Icon,
-  MinusIcon,
-  MoreHorizontalIcon,
-  PlusIcon,
-  SearchIcon,
-  SettingsIcon,
-  ShareIcon,
-  ShoppingBagIcon,
-  TrashIcon,
-} from 'lucide-react'
-import { type CSSProperties, useCallback, useState } from 'react'
+import type { ConnectedStandardSolanaWallet } from '@privy-io/react-auth/solana'
 
+import { usePrivy } from '@privy-io/react-auth'
+import { useCreateWallet, useSignMessage, useWallets } from '@privy-io/react-auth/solana'
+import { address } from '@solana/kit'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/core/ui/alert-dialog'
+  CheckCircle2Icon,
+  Loader2Icon,
+  LogInIcon,
+  LogOutIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  SignatureIcon,
+  WalletIcon,
+  XCircleIcon,
+} from 'lucide-react'
+import { useMemo } from 'react'
+
+import { appConfig, solanaRpc } from '@/core/data-access/app-config'
 import { Badge } from '@/core/ui/badge'
 import { Button } from '@/core/ui/button'
-import { ButtonGroup } from '@/core/ui/button-group'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/core/ui/card'
-import { Checkbox } from '@/core/ui/checkbox'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/core/ui/dropdown-menu'
-import { Field, FieldGroup } from '@/core/ui/field'
-import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/core/ui/input-group'
-import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from '@/core/ui/item'
-import { RadioGroup, RadioGroupItem } from '@/core/ui/radio-group'
-import { Slider } from '@/core/ui/slider'
-import { Switch } from '@/core/ui/switch'
-import { Textarea } from '@/core/ui/textarea'
+
+const LAMPORTS_PER_SOL = 1_000_000_000n
+
+interface ActionResult {
+  error?: unknown
+  message?: string
+  signature?: string
+  updatedAt: number
+}
 
 export function DemoFeature() {
-  const [sliderValue, setSliderValue] = useState<number[]>([500])
-  const handleSliderValueChange = useCallback((value: number | readonly number[]) => {
-    if (typeof value === 'number') {
-      setSliderValue([value])
-    } else {
-      setSliderValue([...value])
-    }
-  }, [])
+  return <PrivySolanaDashboard />
+}
+
+function formatAddress(value: string) {
+  return `${value.slice(0, 4)}...${value.slice(-4)}`
+}
+
+function formatBytes(value: Uint8Array) {
+  return Array.from(value)
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+function formatError(error: unknown) {
+  return error instanceof Error ? error.message : 'The request could not be completed.'
+}
+
+function formatSol(lamports: bigint) {
+  const fraction = (lamports % LAMPORTS_PER_SOL).toString().padStart(9, '0').replace(/0+$/, '')
+  const whole = lamports / LAMPORTS_PER_SOL
+
+  return `${whole}${fraction ? `.${fraction}` : ''} SOL`
+}
+
+function getWalletName(wallet: ConnectedStandardSolanaWallet) {
+  return wallet.standardWallet.name || 'Solana wallet'
+}
+
+function PrivySolanaDashboard() {
+  const { authenticated, connectWallet, login, logout, ready, user } = usePrivy()
+  const { createWallet } = useCreateWallet()
+  const queryClient = useQueryClient()
+  const { ready: walletsReady, wallets } = useWallets()
+  const { signMessage } = useSignMessage()
+
+  const sortedWallets = useMemo(
+    () =>
+      [...wallets].sort(
+        (left, right) =>
+          getWalletName(left).localeCompare(getWalletName(right)) || left.address.localeCompare(right.address),
+      ),
+    [wallets],
+  )
+  const privyWallet = sortedWallets.find((wallet) => wallet.standardWallet.name === 'Privy')
+  const selectedWallet = privyWallet ?? sortedWallets[0]
+
+  const balanceQuery = useQuery({
+    enabled: false,
+    queryFn: async ({ queryKey }) => {
+      const [, walletAddress] = queryKey
+
+      if (!walletAddress) {
+        throw new Error('Connect a wallet first.')
+      }
+
+      const response = await solanaRpc.getBalance(address(walletAddress)).send()
+
+      return formatSol(response.value)
+    },
+    queryKey: ['solanaBalance', selectedWallet?.address ?? null],
+  })
+
+  const createWalletMutation = useMutation({
+    mutationFn: async () => {
+      const { wallet } = await createWallet()
+
+      return `Created embedded wallet ${formatAddress(wallet.address)}.`
+    },
+  })
+
+  const disconnectWalletMutation = useMutation({
+    mutationFn: async (wallet: ConnectedStandardSolanaWallet) => {
+      await wallet.disconnect()
+
+      return `Disconnected ${formatAddress(wallet.address)}.`
+    },
+    onSuccess: (_message, wallet) => {
+      queryClient.removeQueries({ queryKey: ['solanaBalance', wallet.address] })
+    },
+  })
+
+  const signMessageMutation = useMutation({
+    mutationFn: async (wallet: ConnectedStandardSolanaWallet) => {
+      const message = new TextEncoder().encode(`template-mwa-privy-web:${new Date().toISOString()}`)
+      const result = await signMessage({
+        message,
+        wallet,
+      })
+
+      return {
+        message: `Signed with ${formatAddress(wallet.address)}.`,
+        signature: formatBytes(result.signature),
+      }
+    },
+  })
+
+  const logoutMutation = useMutation({
+    mutationFn: async () => {
+      await logout()
+
+      return 'Logged out.'
+    },
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: ['solanaBalance'] })
+      signMessageMutation.reset()
+    },
+  })
+
+  const actionResults: Array<ActionResult | null> = [
+    balanceQuery.error ? { error: balanceQuery.error, updatedAt: balanceQuery.errorUpdatedAt } : null,
+    createWalletMutation.data
+      ? { message: createWalletMutation.data, updatedAt: createWalletMutation.submittedAt }
+      : null,
+    createWalletMutation.error
+      ? { error: createWalletMutation.error, updatedAt: createWalletMutation.submittedAt }
+      : null,
+    disconnectWalletMutation.data
+      ? { message: disconnectWalletMutation.data, updatedAt: disconnectWalletMutation.submittedAt }
+      : null,
+    disconnectWalletMutation.error
+      ? { error: disconnectWalletMutation.error, updatedAt: disconnectWalletMutation.submittedAt }
+      : null,
+    logoutMutation.data ? { message: logoutMutation.data, updatedAt: logoutMutation.submittedAt } : null,
+    logoutMutation.error ? { error: logoutMutation.error, updatedAt: logoutMutation.submittedAt } : null,
+    signMessageMutation.data
+      ? {
+          message: signMessageMutation.data.message,
+          signature: signMessageMutation.data.signature,
+          updatedAt: signMessageMutation.submittedAt,
+        }
+      : null,
+    signMessageMutation.error ? { error: signMessageMutation.error, updatedAt: signMessageMutation.submittedAt } : null,
+  ]
+
+  const actionResult = actionResults
+    .filter((result): result is ActionResult => Boolean(result))
+    .sort((left, right) => right.updatedAt - left.updatedAt)[0]
+
+  const disconnectingWalletAddress = disconnectWalletMutation.variables?.address
 
   return (
-    <div className="min-h-full w-full bg-muted px-4 py-4 sm:px-6 sm:py-6 lg:px-12 lg:py-12 dark:bg-background">
-      <div className="mx-auto grid max-w-3xl gap-4 sm:grid-cols-2">
-        <div className="flex flex-col gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Style Overview</CardTitle>
-              <CardDescription className="line-clamp-2">
-                Designers love packing quirky glyphs into test phrases. This is a preview of the typography styles.
-              </CardDescription>
+    <div className="min-h-full w-full bg-muted px-4 py-4 sm:px-6 sm:py-6 lg:px-12 lg:py-10 dark:bg-background">
+      <div className="mx-auto grid max-w-5xl gap-4 lg:grid-cols-[1fr_22rem]">
+        <section className="grid gap-4">
+          <Card className="border-border/60">
+            <CardHeader className="gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={authenticated ? 'default' : 'secondary'}>
+                  {authenticated ? <CheckCircle2Icon /> : <XCircleIcon />}
+                  {authenticated ? 'Authenticated' : 'Signed out'}
+                </Badge>
+                <Badge variant={walletsReady ? 'outline' : 'secondary'}>
+                  {walletsReady ? <CheckCircle2Icon /> : <Loader2Icon className="animate-spin" />}
+                  Wallets {walletsReady ? 'ready' : 'loading'}
+                </Badge>
+              </div>
+              <div>
+                <CardTitle className="text-2xl font-semibold tracking-tight">Solana Wallet Login</CardTitle>
+                <CardDescription className="mt-1 text-sm/6">
+                  Privy is configured for wallet-only Sign in with Solana.
+                </CardDescription>
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-6 gap-3">
-                {[
-                  '--background',
-                  '--foreground',
-                  '--primary',
-                  '--secondary',
-                  '--muted',
-                  '--accent',
-                  '--border',
-                  '--chart-1',
-                  '--chart-2',
-                  '--chart-3',
-                  '--chart-4',
-                  '--chart-5',
-                ].map((variant) => (
-                  <div className="flex flex-col flex-wrap items-center gap-2" key={variant}>
-                    <div
-                      className="relative aspect-square w-full rounded-lg bg-(--color) after:absolute after:inset-0 after:rounded-lg after:border after:border-border after:mix-blend-darken dark:after:mix-blend-lighten"
-                      style={
-                        {
-                          '--color': `var(${variant})`,
-                        } as CSSProperties
-                      }
-                    />
-                    <div className="hidden max-w-14 truncate font-mono text-[0.60rem] md:block">{variant}</div>
+            <CardContent className="flex flex-wrap gap-2">
+              <Button
+                disabled={!ready || authenticated}
+                onClick={() =>
+                  login({
+                    loginMethods: ['wallet'],
+                    walletChainType: 'solana-only',
+                  })
+                }
+              >
+                <LogInIcon />
+                Log in
+              </Button>
+              <Button
+                disabled={!ready || !authenticated}
+                onClick={() => connectWallet(appConfig.privy.config.appearance)}
+                variant="outline"
+              >
+                <WalletIcon />
+                Connect
+              </Button>
+              <Button
+                disabled={!authenticated || logoutMutation.isPending}
+                onClick={() => logoutMutation.mutate()}
+                variant="outline"
+              >
+                {logoutMutation.isPending ? <Loader2Icon className="animate-spin" /> : <LogOutIcon />}
+                Log out
+              </Button>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card className="border-border/60">
+              <CardHeader>
+                <CardTitle className="text-base font-semibold">Wallets</CardTitle>
+                <CardDescription className="text-xs/relaxed">{sortedWallets.length} connected</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3">
+                {sortedWallets.length ? (
+                  sortedWallets.map((wallet) => (
+                    <div className="grid gap-2 rounded-md border border-border/60 bg-muted/20 p-3" key={wallet.address}>
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">{getWalletName(wallet)}</div>
+                          <div className="truncate font-mono text-xs text-muted-foreground">{wallet.address}</div>
+                        </div>
+                        <Button
+                          aria-label={`Disconnect ${getWalletName(wallet)}`}
+                          disabled={disconnectWalletMutation.isPending}
+                          onClick={() => disconnectWalletMutation.mutate(wallet)}
+                          size="icon-sm"
+                          variant="ghost"
+                        >
+                          {disconnectWalletMutation.isPending && disconnectingWalletAddress === wallet.address ? (
+                            <Loader2Icon className="animate-spin" />
+                          ) : (
+                            <LogOutIcon />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                    No Solana wallet connected.
                   </div>
-                ))}
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/60">
+              <CardHeader>
+                <CardTitle className="text-base font-semibold">Actions</CardTitle>
+                <CardDescription className="text-xs/relaxed">
+                  {selectedWallet ? formatAddress(selectedWallet.address) : 'Connect a wallet first'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-2">
+                <Button
+                  disabled={!authenticated || createWalletMutation.isPending}
+                  onClick={() => createWalletMutation.mutate()}
+                  variant="outline"
+                >
+                  {createWalletMutation.isPending ? <Loader2Icon className="animate-spin" /> : <PlusIcon />}
+                  Embedded wallet
+                </Button>
+                <Button
+                  disabled={!selectedWallet || balanceQuery.isFetching}
+                  onClick={() => void balanceQuery.refetch()}
+                >
+                  {balanceQuery.isFetching ? <Loader2Icon className="animate-spin" /> : <RefreshCwIcon />}
+                  Refresh balance
+                </Button>
+                <Button
+                  disabled={!selectedWallet || signMessageMutation.isPending}
+                  onClick={() => selectedWallet && signMessageMutation.mutate(selectedWallet)}
+                  variant="secondary"
+                >
+                  {signMessageMutation.isPending ? <Loader2Icon className="animate-spin" /> : <SignatureIcon />}
+                  Sign message
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+
+        <aside className="grid content-start gap-4">
+          <Card className="border-border/60">
+            <CardHeader>
+              <CardTitle className="text-base font-semibold">Session</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 text-sm">
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">App ID</div>
+                <div className="mt-1 font-mono text-xs">{formatAddress(appConfig.privy.appId ?? '')}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">Balance</div>
+                <div className="mt-1 font-mono text-xs">{balanceQuery.data ?? 'Not loaded'}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">Network</div>
+                <div className="mt-1 font-mono text-xs">solana:mainnet</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">User</div>
+                <div className="mt-1 truncate font-mono text-xs">{user?.id ?? 'Not authenticated'}</div>
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent>
-              <div className="grid grid-cols-8 place-items-center gap-4">
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <CopyIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <CircleAlertIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <TrashIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <ShareIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <ShoppingBagIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <MoreHorizontalIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <Loader2Icon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <PlusIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <MinusIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <ArrowLeftIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <ArrowRightIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <CheckIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <ChevronDownIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <ChevronRightIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <SearchIcon />
-                </Card>
-                <Card className="flex size-8 items-center justify-center rounded-md p-0 ring ring-border *:[svg]:size-4">
-                  <SettingsIcon />
-                </Card>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-        <div className="flex flex-col gap-4">
-          <Card className="w-full">
-            <CardContent className="flex flex-col gap-6">
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-wrap gap-2">
-                  <Button>Button</Button>
-                  <Button variant="secondary">Secondary</Button>
-                  <Button variant="outline">Outline</Button>
-                  <Button variant="ghost">Ghost</Button>
-                </div>
-                <Item variant="outline">
-                  <ItemContent>
-                    <ItemTitle>Two-factor authentication</ItemTitle>
-                    <ItemDescription className="text-pretty xl:hidden 2xl:block">
-                      Verify via email or phone number.
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions className="hidden md:flex">
-                    <Button size="sm" variant="secondary">
-                      Enable
-                    </Button>
-                  </ItemActions>
-                </Item>
-              </div>
-              <Slider
-                aria-label="Slider"
-                className="flex-1"
-                max={1000}
-                min={0}
-                onValueChange={handleSliderValueChange}
-                step={10}
-                value={sliderValue}
-              />
-              <FieldGroup>
-                <Field>
-                  <InputGroup>
-                    <InputGroupInput aria-label="Name" placeholder="Name" />
-                    <InputGroupAddon align="inline-end">
-                      <InputGroupText>
-                        <SearchIcon />
-                      </InputGroupText>
-                    </InputGroupAddon>
-                  </InputGroup>
-                </Field>
-                <Field className="flex-1">
-                  <Textarea aria-label="Message" className="resize-none" placeholder="Message" />
-                </Field>
-              </FieldGroup>
-              <div className="flex items-center gap-2">
-                <div className="flex gap-2">
-                  <Badge>Badge</Badge>
-                  <Badge variant="secondary">Secondary</Badge>
-                  <Badge variant="outline">Outline</Badge>
-                </div>
-                <RadioGroup className="ml-auto flex w-fit gap-3" defaultValue="apple">
-                  <RadioGroupItem aria-label="Apple" value="apple" />
-                  <RadioGroupItem aria-label="Banana" value="banana" />
-                </RadioGroup>
-                <div className="flex gap-3">
-                  <Checkbox aria-label="Enabled" defaultChecked />
-                  <Checkbox aria-label="Disabled" />
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <AlertDialog>
-                  <AlertDialogTrigger render={<Button variant="outline" />}>
-                    <span className="hidden md:block">Alert Dialog</span>
-                    <span className="block md:hidden">Dialog</span>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent size="sm">
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Allow accessory to connect?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Do you want to allow the USB accessory to connect to this device and your data?
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Don&apos;t allow</AlertDialogCancel>
-                      <AlertDialogAction>Allow</AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-                <ButtonGroup>
-                  <Button variant="outline">Button Group</Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={<Button aria-label="Open quick actions" size="icon" variant="outline" />}
-                    >
-                      <ChevronUpIcon />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-fit" side="top">
-                      <DropdownMenuGroup>
-                        <DropdownMenuLabel>Quick Actions</DropdownMenuLabel>
-                        <DropdownMenuItem>Mute Conversation</DropdownMenuItem>
-                        <DropdownMenuItem>Mark as Read</DropdownMenuItem>
-                        <DropdownMenuItem>Block User</DropdownMenuItem>
-                      </DropdownMenuGroup>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuGroup>
-                        <DropdownMenuLabel>Conversation</DropdownMenuLabel>
-                        <DropdownMenuItem>Share Conversation</DropdownMenuItem>
-                        <DropdownMenuItem>Copy Conversation</DropdownMenuItem>
-                        <DropdownMenuItem>Report Conversation</DropdownMenuItem>
-                      </DropdownMenuGroup>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuGroup>
-                        <DropdownMenuItem variant="destructive">Delete Conversation</DropdownMenuItem>
-                      </DropdownMenuGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </ButtonGroup>
-                <Switch aria-label="Enable setting" className="ml-auto" defaultChecked />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+
+          {actionResult && (
+            <Card className="border-border/60">
+              <CardHeader>
+                <CardTitle className="text-base font-semibold">Result</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3 text-sm">
+                {actionResult.error ? (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
+                    {formatError(actionResult.error)}
+                  </div>
+                ) : null}
+                {actionResult.signature ? (
+                  <div className="rounded-md border border-border/60 bg-muted/30 p-3 font-mono text-xs break-all">
+                    {actionResult.signature}
+                  </div>
+                ) : null}
+                {actionResult.message ? (
+                  <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-xs">
+                    {actionResult.message}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          )}
+        </aside>
       </div>
     </div>
   )

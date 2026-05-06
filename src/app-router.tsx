@@ -24,14 +24,14 @@ export const appRouter = createBrowserRouter(
               'The route you opened does not exist, or it may have moved while the starter was being cleaned up.',
             links: [
               {
-                description: 'Browse the reference UI primitives, typography, and demo controls.',
-                title: 'Demo',
-                to: '/demo',
-              },
-              {
                 description: 'Read what this starter includes and how to extend it for your own app.',
                 title: 'About',
                 to: '/about',
+              },
+              {
+                description: 'Connect a Solana wallet with Privy.',
+                title: 'Wallet',
+                to: '/demo',
               },
             ],
             title: 'Page not found',
@@ -42,8 +42,8 @@ export const appRouter = createBrowserRouter(
       element: (
         <ShellFeature
           links={[
-            { label: 'Demo', to: '/demo' },
             { label: 'About', to: '/about' },
+            { label: 'Wallet', to: '/demo' },
           ]}
         />
       ),

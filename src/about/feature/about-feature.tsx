@@ -7,27 +7,26 @@ export function AboutFeature() {
         <CardHeader className="gap-2">
           <CardTitle className="text-xl font-semibold tracking-tight">About</CardTitle>
           <CardDescription className="max-w-2xl text-sm/6">
-            Template Mwa Privy Web is a simple starter for dashboards, settings pages, and other internal tools built
-            with a clean shell and reusable UI primitives.
+            Template Mwa Privy Web is a Privy Solana starter with wallet-only authentication and Solana Kit RPC clients.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-lg border border-border/60 bg-muted/20 p-4">
-            <div className="text-sm font-medium">Consistent UI</div>
+            <div className="text-sm font-medium">No email or social login</div>
             <div className="mt-1 text-xs/relaxed text-muted-foreground">
-              Shared cards, controls, and spacing patterns.
+              The Privy modal is limited to wallet login.
             </div>
           </div>
           <div className="rounded-lg border border-border/60 bg-muted/20 p-4">
-            <div className="text-sm font-medium">Good starter shape</div>
+            <div className="text-sm font-medium">Solana Kit</div>
             <div className="mt-1 text-xs/relaxed text-muted-foreground">
-              Useful for analytics, CRUD flows, and settings.
+              RPC reads use <code className="font-mono">@solana/kit</code>.
             </div>
           </div>
           <div className="rounded-lg border border-border/60 bg-muted/20 p-4">
-            <div className="text-sm font-medium">Responsive layout</div>
+            <div className="text-sm font-medium">Wallet actions</div>
             <div className="mt-1 text-xs/relaxed text-muted-foreground">
-              Readable on smaller screens without feeling empty on larger ones.
+              Connect, create embedded wallets, read balances, and sign messages.
             </div>
           </div>
         </CardContent>
